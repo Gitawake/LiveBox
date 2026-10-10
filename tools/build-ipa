@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""Build an iOS Xcode project and package an unsigned IPA using macOS tools."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+
+def run(command, capture=False):
+    result = subprocess.run(command, text=True, stdout=subprocess.PIPE if capture else None,
+                            stderr=subprocess.PIPE if capture else None)
+    if result.returncode:
+        if capture:
+            print(result.stderr or result.stdout, file=sys.stderr)
+        raise RuntimeError(f"命令执行失败（退出码 {result.returncode}）：{command[0]}")
+    return result.stdout if capture else None
+
+
+def find_project(path):
+    if path.is_dir() and path.suffix in (".xcworkspace", ".xcodeproj"):
+        return path
+    if not path.is_dir():
+        raise RuntimeError(f"项目目录不存在：{path}")
+    # 工作区可能包含 CocoaPods 等依赖，优先使用工作区。
+    for extension in (".xcworkspace", ".xcodeproj"):
+        candidates = sorted(p for p in path.glob(f"*{extension}") if p.is_dir())
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            names = "、".join(p.name for p in candidates)
+            raise RuntimeError(f"找到多个项目：{names}。请直接传入要使用的 {extension} 路径。")
+    raise RuntimeError("目录中没有 .xcodeproj 或 .xcworkspace，请传入包含项目的目录。")
+
+
+def choose_scheme(metadata, project, requested):
+    schemes = metadata.get("workspace", metadata.get("project", {})).get("schemes", [])
+    if requested:
+        if requested not in schemes:
+            raise RuntimeError(f"找不到 Scheme {requested}；可选：{'、'.join(schemes)}")
+        return requested
+    if project.stem in schemes:
+        return project.stem
+    if len(schemes) == 1:
+        return schemes[0]
+    if not schemes:
+        raise RuntimeError("没有可用 Scheme，请在 Xcode 中创建并共享 Scheme。")
+    raise RuntimeError(f"无法自动确定 Scheme，请用 --scheme 指定；可选：{'、'.join(schemes)}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="传入项目目录，自动编译并生成未签名的 iPhone/iPad IPA。")
+    parser.add_argument("project", type=Path, help="项目目录，或 .xcodeproj / .xcworkspace 路径")
+    parser.add_argument("--scheme", help="多个 Scheme 时指定要编译的 Scheme")
+    parser.add_argument("--output", type=Path, help="输出 .ipa 文件路径；默认 项目目录/build/ipa/App名称.ipa")
+    args = parser.parse_args()
+    for tool in ("xcodebuild", "ditto"):
+        if not shutil.which(tool):
+            raise RuntimeError(f"找不到 {tool}，请安装完整 Xcode 并选择其开发工具目录。")
+
+    project = find_project(args.project.expanduser().resolve())
+    option = "-workspace" if project.suffix == ".xcworkspace" else "-project"
+    selection = ["xcodebuild", option, str(project)]
+    metadata = json.loads(run(selection + ["-list", "-json"], capture=True))
+    scheme = choose_scheme(metadata, project, args.scheme)
+    output = args.output.expanduser().resolve() if args.output else None
+    if output and output.suffix.lower() != ".ipa":
+        raise RuntimeError("--output 必须指定一个以 .ipa 结尾的文件路径。")
+
+    print(f"项目：{project}\nScheme：{scheme}\n开始编译 Release 真机版（无需签名账号）…", flush=True)
+    with tempfile.TemporaryDirectory(prefix="build-ipa-") as directory:
+        work = Path(directory)
+        archive = work / "App.xcarchive"
+        run(selection + ["-scheme", scheme, "-configuration", "Release", "-sdk", "iphoneos",
+                         "-destination", "generic/platform=iOS", "-derivedDataPath", str(work / "DerivedData"),
+                         "-archivePath", str(archive), "CODE_SIGNING_ALLOWED=NO",
+                         "CODE_SIGNING_REQUIRED=NO", "archive"])
+        applications = archive / "Products" / "Applications"
+        apps = sorted(applications.glob("*.app"))
+        if len(apps) != 1:
+            raise RuntimeError("归档未产生唯一的 .app，请确认 Scheme 是 iOS App，且 App 的 Skip Install 为 NO。")
+        app = apps[0]
+        output = output or project.parent / "build" / "ipa" / f"{app.stem}.ipa"
+        payload = work / "Payload"
+        payload.mkdir()
+        run(["ditto", str(app), str(payload / app.name)])
+        packaged = work / "App.ipa"
+        run(["ditto", "-c", "-k", "--keepParent", str(payload), str(packaged)])
+        # 先生成完整 IPA，再替换输出，编译失败不会覆盖上一次的结果。
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(prefix=".build-ipa-", suffix=".ipa", dir=output.parent,
+                                         delete=False) as staged:
+            staged_path = Path(staged.name)
+        try:
+            shutil.copyfile(packaged, staged_path)
+            os.replace(staged_path, output)
+        finally:
+            staged_path.unlink(missing_ok=True)
+    print(f"\n打包完成：{output}\n这是未签名 IPA，安装到 iPhone 前需使用侧载工具签名。", flush=True)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n已取消打包。", file=sys.stderr)
+        sys.exit(130)
+    except (RuntimeError, OSError, ValueError) as error:
+        print(f"\n打包失败：{error}", file=sys.stderr)
+        sys.exit(1)
