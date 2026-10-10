@@ -1,0 +1,13 @@
+# Build output
+/build/
+/output/
+DerivedData/
+*.ipa
+*.xcarchive
+# Xcode user settings
+xcuserdata/
+*.xcuserstate
+# Python and macOS
+__pycache__/
+*.py[cod]
+.DS_Store
