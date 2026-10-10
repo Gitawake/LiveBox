@@ -1,0 +1,54 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unsigned iOS IPA
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Show build environment
+        run: |
+          xcodebuild -version
+          python3 --version
+
+      - name: Build Release IPA
+        run: python3 tools/build-ipa . --scheme LiveBox --output build/ipa/LiveBox.ipa
+
+      - name: Verify IPA
+        run: |
+          python3 - <<'PY'
+          import plistlib
+          import zipfile
+          with zipfile.ZipFile('build/ipa/LiveBox.ipa') as archive:
+              assert archive.testzip() is None, 'Corrupt IPA'
+              info = plistlib.loads(archive.read('Payload/LiveBox.app/Info.plist'))
+              assert info['CFBundleSupportedPlatforms'] == ['iPhoneOS']
+              print('Version:', info['CFBundleShortVersionString'], 'Build:', info['CFBundleVersion'])
+          PY
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v7
+        with:
+          name: LiveBox-unsigned-ipa-${{ github.run_number }}
+          path: build/ipa/LiveBox.ipa
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
