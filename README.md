@@ -27,13 +27,13 @@ open LiveBox.xcodeproj
 项目内置 `tools/build-ipa`，使用 macOS、完整 Xcode 和 Python 3 编译 Release 真机版本，并生成未签名 IPA：
 
 ```bash
-./tools/build-ipa .
+python3 tools/build-ipa .
 ```
 
 默认输出为 `build/ipa/LiveBox.ipa`。可指定 Scheme 和输出路径：
 
 ```bash
-./tools/build-ipa . --scheme LiveBox --output build/ipa/LiveBox-1.0.0.ipa
+python3 tools/build-ipa . --scheme LiveBox --output build/ipa/LiveBox-1.0.0.ipa
 ```
 
 也可在其他目录调用脚本，传入本项目的绝对路径。构建过程中使用临时目录，结束后自动清理；构建失败不会覆盖之前的 IPA。生成的 IPA 需要通过侧载工具签名后安装，不是用于 App Store 上传的签名归档。
