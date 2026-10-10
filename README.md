@@ -2,6 +2,12 @@
 
 SwiftUI iOS App，将视频生成 Live Photo 并保存到系统相册，可用于动态锁屏。最低 iOS 18，无第三方运行时依赖。纯元数据模板采用 MIT 许可，见 ThirdPartyNotices.md。
 
+## App 截图
+
+<img src="docs/images/livebox-app.png" alt="LiveBox 主界面：选择视频并生成 Live Photo" width="320" />
+
+截图来自 iPhone 16 Pro 模拟器。
+
 ## 应用信息
 
 - 显示名称：LiveBox
