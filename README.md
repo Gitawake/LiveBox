@@ -38,6 +38,12 @@ python3 tools/build-ipa . --scheme LiveBox --output build/ipa/LiveBox-1.0.0.ipa
 
 也可在其他目录调用脚本，传入本项目的绝对路径。构建过程中使用临时目录，结束后自动清理；构建失败不会覆盖之前的 IPA。生成的 IPA 需要通过侧载工具签名后安装，不是用于 App Store 上传的签名归档。
 
+## GitHub 自动构建
+
+进入仓库 **Actions → Build IPA → Run workflow**，选择 `main` 并运行。构建成功后，在该次运行页面的 **Artifacts** 下载 `LiveBox-unsigned-ipa-运行编号`，解压得到 `LiveBox.ipa`。产物保留 30 天。
+
+推送以 `v` 开头的版本标签（例如 `v1.0.0`）也会自动构建。普通代码提交不触发打包。流程使用 GitHub 的 macOS 运行器和仓库内打包脚本，无需上传 Apple 证书或配置签名 Secrets。输出仍为未签名 IPA，需另行签名后安装。
+
 ## 使用
 
 App 只有一个生成模式。选择视频，可拖动固定 3 秒选框选择片段，短视频使用全部可用画面。图片封面可选；点击“使用视频帧作封面”可清除所选图片。
