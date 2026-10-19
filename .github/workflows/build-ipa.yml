@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build unsigned iOS IPA
+    name: Build IPA for SideStore
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -28,6 +28,9 @@ jobs:
         run: |
           xcodebuild -version
           python3 --version
+
+      - name: Test nested signing
+        run: python3 Tests/test_build_ipa_signing.py
 
       - name: Build Release IPA
         run: python3 tools/build-ipa . --scheme LiveBox --output build/ipa/LiveBox.ipa
@@ -43,11 +46,16 @@ jobs:
               assert info['CFBundleSupportedPlatforms'] == ['iPhoneOS']
               print('Version:', info['CFBundleShortVersionString'], 'Build:', info['CFBundleVersion'])
           PY
+          verification_dir="$(mktemp -d)"
+          trap 'rm -rf "$verification_dir"' EXIT
+          ditto -x -k build/ipa/LiveBox.ipa "$verification_dir"
+          codesign --verify --deep --strict --verbose=2 "$verification_dir/Payload/LiveBox.app"
+          codesign -dvv "$verification_dir/Payload/LiveBox.app"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v7
         with:
-          name: LiveBox-unsigned-ipa-${{ github.run_number }}
+          name: LiveBox-sideload-ipa-${{ github.run_number }}
           path: build/ipa/LiveBox.ipa
           if-no-files-found: error
           retention-days: 30
