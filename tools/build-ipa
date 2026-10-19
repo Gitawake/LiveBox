@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Build an iOS Xcode project and package an unsigned IPA using macOS tools."""
+"""Build an iOS Xcode project and package an ad-hoc-signed IPA for re-signing using macOS tools."""
 
 import argparse
 import json
 import os
+import plistlib
 from pathlib import Path
 import shutil
 import subprocess
@@ -52,13 +53,39 @@ def choose_scheme(metadata, project, requested):
     raise RuntimeError(f"无法自动确定 Scheme，请用 --scheme 指定；可选：{'、'.join(schemes)}")
 
 
+def sign_for_sideloading(app):
+    """Sign nested code before its containing bundle; no Apple identity needed."""
+    nested = [path for path in app.rglob("*")
+              if not path.is_symlink() and (
+                  (path.is_dir() and path.suffix in (".app", ".appex", ".framework", ".xpc"))
+                  or (path.is_file() and path.suffix == ".dylib"))]
+    targets = sorted(nested, key=lambda path: (-len(path.parts), str(path))) + [app]
+    with tempfile.TemporaryDirectory(prefix="build-ipa-entitlements-") as directory:
+        for index, target in enumerate(targets):
+            # Preserve existing entitlements if an embedded dependency was signed.
+            existing = subprocess.run(["codesign", "-d", "--entitlements", ":-", str(target)],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            command = ["codesign", "--force", "--sign", "-", "--timestamp=none"]
+            if existing.returncode == 0 and existing.stdout.strip():
+                try:
+                    entitlements = plistlib.loads(existing.stdout)
+                except (ValueError, plistlib.InvalidFileException) as error:
+                    raise RuntimeError(f"无法读取已有签名权限：{target}") from error
+                entitlement_file = Path(directory) / f"{index}.plist"
+                entitlement_file.write_bytes(plistlib.dumps(entitlements))
+                command += ["--entitlements", str(entitlement_file)]
+            run(command + [str(target)])
+            run(["codesign", "--verify", "--strict", str(target)])
+    run(["codesign", "--verify", "--deep", "--strict", str(app)])
+
+
 def main():
-    parser = argparse.ArgumentParser(description="传入项目目录，自动编译并生成未签名的 iPhone/iPad IPA。")
+    parser = argparse.ArgumentParser(description="传入项目目录，自动编译并生成带 Ad Hoc 临时签名、供侧载工具重签的 iPhone/iPad IPA。")
     parser.add_argument("project", type=Path, help="项目目录，或 .xcodeproj / .xcworkspace 路径")
     parser.add_argument("--scheme", help="多个 Scheme 时指定要编译的 Scheme")
     parser.add_argument("--output", type=Path, help="输出 .ipa 文件路径；默认 项目目录/build/ipa/App名称.ipa")
     args = parser.parse_args()
-    for tool in ("xcodebuild", "ditto"):
+    for tool in ("xcodebuild", "ditto", "codesign"):
         if not shutil.which(tool):
             raise RuntimeError(f"找不到 {tool}，请安装完整 Xcode 并选择其开发工具目录。")
 
@@ -88,8 +115,10 @@ def main():
         payload = work / "Payload"
         payload.mkdir()
         run(["ditto", str(app), str(payload / app.name)])
+        print("添加 Ad Hoc 临时签名并验证嵌套代码…", flush=True)
+        sign_for_sideloading(payload / app.name)
         packaged = work / "App.ipa"
-        run(["ditto", "-c", "-k", "--keepParent", str(payload), str(packaged)])
+        run(["ditto", "-c", "-k", "--keepParent", "--norsrc", str(payload), str(packaged)])
         # 先生成完整 IPA，再替换输出，编译失败不会覆盖上一次的结果。
         output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(prefix=".build-ipa-", suffix=".ipa", dir=output.parent,
@@ -100,7 +129,7 @@ def main():
             os.replace(staged_path, output)
         finally:
             staged_path.unlink(missing_ok=True)
-    print(f"\n打包完成：{output}\n这是未签名 IPA，安装到 iPhone 前需使用侧载工具签名。", flush=True)
+    print(f"\n打包完成：{output}\n已添加 Ad Hoc 临时签名；安装到 iPhone 前仍需由 SideStore 等侧载工具重签。", flush=True)
 
 
 if __name__ == "__main__":
