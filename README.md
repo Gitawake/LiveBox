@@ -30,7 +30,7 @@ open LiveBox.xcodeproj
 
 ## 打包 IPA
 
-项目内置 `tools/build-ipa`，使用 macOS、完整 Xcode 和 Python 3 编译 Release 真机版本，并生成未签名 IPA：
+项目内置 `tools/build-ipa`，使用 macOS、完整 Xcode 和 Python 3 编译 Release 真机版本，并生成带 Ad Hoc 临时签名的 IPA：
 
 ```bash
 python3 tools/build-ipa .
@@ -46,9 +46,9 @@ python3 tools/build-ipa . --scheme LiveBox --output build/ipa/LiveBox-1.0.0.ipa
 
 ## GitHub 自动构建
 
-进入仓库 **Actions → Build IPA → Run workflow**，选择 `main` 并运行。构建成功后，在该次运行页面的 **Artifacts** 下载 `LiveBox-unsigned-ipa-运行编号`，解压得到 `LiveBox.ipa`。产物保留 30 天。
+进入仓库 **Actions → Build IPA → Run workflow**，选择 `main` 并运行。构建成功后，在该次运行页面的 **Artifacts** 下载 `LiveBox-sideload-ipa-运行编号`，解压得到 `LiveBox.ipa`。产物保留 30 天。
 
-推送以 `v` 开头的版本标签（例如 `v1.0.0`）也会自动构建。普通代码提交不触发打包。流程使用 GitHub 的 macOS 运行器和仓库内打包脚本，无需上传 Apple 证书或配置签名 Secrets。输出仍为未签名 IPA，需另行签名后安装。
+推送以 `v` 开头的版本标签（例如 `v1.0.0`）也会自动构建。普通代码提交不触发打包。流程使用 GitHub 的 macOS 运行器和仓库内打包脚本，无需上传 Apple 证书或配置签名 Secrets。输出仍为带 Ad Hoc 临时签名的 IPA，需另行签名后安装。
 
 ## 使用
 
@@ -83,3 +83,11 @@ App 只有一个生成模式。选择视频，可拖动固定 3 秒选框选择�
 ## 许可证
 
 项目采用 [MIT License](LICENSE)。第三方动态元数据模板的许可与归属见 [ThirdPartyNotices.md](ThirdPartyNotices.md)。
+
+## SideStore 兼容性
+
+脚本会在打包前使用 macOS 自带的 `codesign` 添加 Ad Hoc 临时签名，无需 Apple 开发者证书或第三方 Python 库。嵌套 Framework、动态库、App Extension 和子应用按从内到外的顺序签名，并校验签名；已有签名中的 entitlements 会保留。完全未签名构建中的权限不会凭空补齐，依赖特殊权限的项目仍需准备对应配置。
+
+此处的 Ad Hoc 是 `codesign --sign -` 的本地临时签名，不是 Apple 的 Ad Hoc 分发证书。安装时仍需由 SideStore 等侧载工具使用你的账号重新签名。LiveBox 的临时签名测试包已由用户确认可通过 SideStore 安装；其他项目仍需实际验证。
+
+旧版完全未签名的 LiveBox IPA 曾触发 `The app is in an invalid format. SideStore.OperationError 2`。请重新运行构建，下载新产物；旧文件不会自动更新。
